@@ -162,14 +162,6 @@ async def apply_role(member: discord.Member) -> None:
     keyword = config.get("keyword", DEFAULT_KEYWORD)
     check_tag = config.get("check_guild_tag", True)
 
-    if member.status == discord.Status.offline:
-        if role in member.roles:
-            try:
-                await member.remove_roles(role, reason="Membre hors ligne")
-            except discord.Forbidden:
-                print(f"[{member.guild.name}] {member}: retire (hors ligne)")
-        return
-
     if should_have_role(member, keyword, check_tag):
         reason_parts = []
         if has_keyword_in_status(member, keyword):
@@ -224,14 +216,6 @@ async def initial_scan(guild: discord.Guild) -> tuple[int, int]:
     removed = 0
     for member in guild.members:
         if member.bot:
-            continue
-        if member.status == discord.Status.offline:
-            if role in member.roles:
-                try:
-                    await member.remove_roles(role)
-                    removed += 1
-                except discord.Forbidden:
-                    pass
             continue
         if should_have_role(member, keyword, check_tag):
             if role not in member.roles:
