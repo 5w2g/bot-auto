@@ -1,0 +1,33 @@
+name: Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */5 * * *"
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    concurrency:
+      group: discord-bot
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python bot.py
