@@ -36,13 +36,15 @@ def load_configs() -> dict:
     return {}
 
 
-def commit_config_to_github() -> None:
+def commit_config_to_github() -> bool:
     if not (GITHUB_REPO and GITHUB_TOKEN):
-        return
+        print("[config] GH_REPO ou GH_TOKEN manquant, skip commit")
+        return False
     try:
         owner, repo_name = GITHUB_REPO.split("/", 1)
     except ValueError:
-        return
+        print("[config] GH_REPO invalide, skip commit")
+        return False
 
     url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{CONFIG_FILE}"
     headers = {
@@ -60,7 +62,7 @@ def commit_config_to_github() -> None:
     except urllib.error.HTTPError as e:
         if e.code != 404:
             print(f"[config] GET error: {e}")
-            return
+            return False
 
     new_content = json.dumps(configs, indent=2, ensure_ascii=False)
     payload = {
@@ -79,9 +81,50 @@ def commit_config_to_github() -> None:
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            print(f"[config] commit ({resp.status})")
+            print(f"[config] commit OK ({resp.status})")
+            return True
     except Exception as e:
         print(f"[config] PUT error: {e}")
+        return False
+
+
+def pull_config_from_github() -> bool:
+    """Recupere la derniere config depuis GitHub et la charge en memoire."""
+    if not (GITHUB_REPO and GITHUB_TOKEN):
+        return False
+    try:
+        owner, repo_name = GITHUB_REPO.split("/", 1)
+    except ValueError:
+        return False
+
+    url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{CONFIG_FILE}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "discord-bot",
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            remote_configs = json.loads(content)
+            configs.clear()
+            configs.update(remote_configs)
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(configs, f, indent=2, ensure_ascii=False)
+            print(
+                f"[config] pull OK ({len(configs)} serveur(s))"
+            )
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print("[config] pas de config distante, conserve le local")
+        else:
+            print(f"[config] pull GET error: {e}")
+    except Exception as e:
+        print(f"[config] pull error: {e}")
+    return False
 
 
 def save_configs() -> None:
@@ -91,6 +134,7 @@ def save_configs() -> None:
 
 
 configs: dict = load_configs()
+print(f"[config] {len(configs)} serveur(s) charges au demarrage")
 
 
 def get_config(guild_id: int) -> dict:
@@ -288,6 +332,8 @@ async def on_ready():
     except Exception as e:
         print(f"Erreur de sync: {e}")
 
+    pull_config_from_github()
+
     await bot.change_presence(
         activity=discord.CustomActivity(name="/éphémère")
     )
@@ -467,6 +513,26 @@ async def setup_reset(interaction: discord.Interaction):
     await interaction.response.send_message(
         "Configuration reinitialisee.", ephemeral=True
     )
+
+
+@setup_group.command(
+    name="pull",
+    description="Forcer le telechargement de la config depuis GitHub",
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def setup_pull(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    ok = pull_config_from_github()
+    if ok:
+        await interaction.followup.send(
+            f"Config mise a jour depuis GitHub ({len(configs)} serveur(s)).",
+            ephemeral=True,
+        )
+    else:
+        await interaction.followup.send(
+            "Pas de config distante (ou erreur). La config locale est conservee.",
+            ephemeral=True,
+        )
 
 
 @setup_group.command(
