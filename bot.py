@@ -368,6 +368,36 @@ if os.name != "nt":
     signal.signal(signal.SIGINT, _signal_handler)
 
 
+startup_time: float = 0.0
+
+
+@tasks.loop(minutes=5)
+async def heartbeat() -> None:
+    """Log periodique pour confirmer que le bot tourne."""
+    if startup_time == 0:
+        return
+    uptime = int(asyncio.get_event_loop().time() - startup_time)
+    h, rem = divmod(uptime, 3600)
+    m, _ = divmod(rem, 60)
+    ka_next = keep_alive.next_iteration
+    ka_in = (
+        f"dans ~{int((ka_next - asyncio.get_event_loop().time())/60)}min"
+        if ka_next
+        else "N/A"
+    )
+    print(
+        f"[heartbeat] up {h}h{m}m | "
+        f"{len(bot.guilds)} serveurs | "
+        f"keep_alive {ka_in} | "
+        f"{sum(g.member_count or 0 for g in bot.guilds)} membres"
+    )
+
+
+@heartbeat.before_loop
+async def before_heartbeat() -> None:
+    await bot.wait_until_ready()
+
+
 @bot.event
 async def on_ready():
     print(f"Connecte en tant que {bot.user} (ID: {bot.user.id})")
@@ -383,8 +413,12 @@ async def on_ready():
         activity=discord.CustomActivity(name="/éphémère")
     )
 
+    global startup_time
+    startup_time = asyncio.get_event_loop().time()
     if not keep_alive.is_running():
         keep_alive.start()
+    if not heartbeat.is_running():
+        heartbeat.start()
 
     for guild in bot.guilds:
         try:
@@ -653,6 +687,76 @@ async def check(
         f"**Devrait avoir le role**: `{should}`",
         f"**Role config**: {role.mention if role else '`non configure`'}",
         f"**Possede deja le role**: `{has_role}`",
+    ]
+    await interaction.response.send_message(
+        "\n".join(lines), ephemeral=True
+    )
+
+
+@bot.tree.command(
+    name="ping",
+    description="Verifier que le bot repond (watchdog)",
+)
+async def ping(interaction: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    if startup_time:
+        uptime = int(asyncio.get_event_loop().time() - startup_time)
+        h, rem = divmod(uptime, 3600)
+        m, s = divmod(rem, 60)
+        uptime_str = f"{h}h {m}m {s}s"
+    else:
+        uptime_str = "N/A"
+    ka_next = keep_alive.next_iteration
+    ka_in = (
+        f"~{int((ka_next - asyncio.get_event_loop().time())/60)}min"
+        if ka_next
+        else "N/A"
+    )
+    heart_next = heartbeat.next_iteration
+    heart_in = (
+        f"~{int((heart_next - asyncio.get_event_loop().time())/60)}min"
+        if heart_next
+        else "N/A"
+    )
+    lines = [
+        f"Bot en ligne :white_check_mark:",
+        f"Latence : `{latency}ms`",
+        f"Uptime : `{uptime_str}`",
+        f"Prochain keep_alive : `{ka_in}`",
+        f"Prochain heartbeat : `{heart_in}`",
+    ]
+    await interaction.response.send_message(
+        "\n".join(lines), ephemeral=True
+    )
+
+
+@bot.tree.command(
+    name="watchdog",
+    description="Voir l'etat du systeme anti-timeout",
+)
+async def watchdog(interaction: discord.Interaction):
+    if startup_time:
+        uptime = int(asyncio.get_event_loop().time() - startup_time)
+        h, rem = divmod(uptime, 3600)
+        m, s = divmod(rem, 60)
+        uptime_str = f"{h}h{m}m{s}s"
+    else:
+        uptime_str = "N/A"
+    ka_next = keep_alive.next_iteration
+    ka_in = (
+        f"~{int((ka_next - asyncio.get_event_loop().time())/60)}min"
+        if ka_next
+        else "N/A"
+    )
+    on_gh = "oui" if GITHUB_REPO else "non (local)"
+    lines = [
+        f":shield: **Watchdog status**",
+        f"Bot actif : :white_check_mark:",
+        f"Mode hebergement : `{on_gh}`",
+        f"Uptime : `{uptime_str}`",
+        f"Prochain keep_alive : `{ka_in}`",
+        f"Timeout GitHub : `270 min (4h30)`",
+        f"Triple securite : keep_alive (4h) + SIGTERM + cron backup (4h30)",
     ]
     await interaction.response.send_message(
         "\n".join(lines), ephemeral=True
