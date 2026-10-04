@@ -3,12 +3,13 @@ name: Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */5 * * *"
+    - cron: "0 */4 * * *"
+    - cron: "30 */4 * * *"
 
 jobs:
   bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 270
     concurrency:
       group: discord-bot
       cancel-in-progress: true
@@ -29,5 +30,6 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          GH_BRANCH: ${{ github.ref_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python bot.py

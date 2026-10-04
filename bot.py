@@ -286,7 +286,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-@tasks.loop(minutes=280)
+@tasks.loop(minutes=240)
 async def keep_alive() -> None:
     """Declenche un nouveau run du workflow avant le timeout GitHub Actions."""
     if not (GITHUB_REPO and GITHUB_TOKEN):
@@ -308,19 +308,64 @@ async def keep_alive() -> None:
             "User-Agent": "discord-bot",
         },
     )
-    try:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, lambda: urllib.request.urlopen(req, timeout=15)
-        )
-        print("[keep_alive] Prochain workflow declenche")
-    except Exception as e:
-        print(f"[keep_alive] Erreur: {e}")
+    for attempt in range(3):
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=15)
+            )
+            print(f"[keep_alive] Prochain workflow declenche (tentative {attempt+1})")
+            return
+        except Exception as e:
+            print(f"[keep_alive] tentative {attempt+1} echouee: {e}")
+            await asyncio.sleep(30)
 
 
 @keep_alive.before_loop
 async def before_keep_alive() -> None:
     await bot.wait_until_ready()
+
+
+import signal
+import sys
+
+
+def _trigger_next_workflow_sync() -> None:
+    """Declenche le prochain workflow de maniere synchrone (pour SIGTERM)."""
+    if not (GITHUB_REPO and GITHUB_TOKEN):
+        return
+    url = (
+        f"https://api.github.com/repos/{GITHUB_REPO}"
+        f"/actions/workflows/{WORKFLOW_FILE}/dispatches"
+    )
+    data = json.dumps({"ref": GITHUB_BRANCH}).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "discord-bot",
+        },
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        print("[sigterm] Prochain workflow declenche")
+    except Exception as e:
+        print(f"[sigterm] Erreur: {e}")
+
+
+def _signal_handler(signum, frame):
+    print(f"[sigterm] Recu, declenchement du prochain workflow")
+    _trigger_next_workflow_sync()
+    sys.exit(0)
+
+
+if os.name != "nt":
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
 
 
 @bot.event
